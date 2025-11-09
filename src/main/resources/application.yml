@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: task-manager
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+security:
+  jwt:
+    secret: change-me-in-prod
+    expiration-minutes: 60
+springdoc:
+  swagger-ui:
+    path: /docs
+  api-docs:
+    path: /docs/api

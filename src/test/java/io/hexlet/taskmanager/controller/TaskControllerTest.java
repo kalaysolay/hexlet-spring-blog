@@ -1,0 +1,190 @@
+package io.hexlet.taskmanager.controller;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.hexlet.taskmanager.dto.auth.LoginRequest;
+import io.hexlet.taskmanager.dto.label.LabelCreateRequest;
+import io.hexlet.taskmanager.dto.task.TaskCreateRequest;
+import io.hexlet.taskmanager.dto.task.TaskUpdateRequest;
+import io.hexlet.taskmanager.dto.taskstatus.TaskStatusCreateRequest;
+import io.hexlet.taskmanager.dto.user.UserCreateRequest;
+import io.hexlet.taskmanager.model.Task;
+import io.hexlet.taskmanager.repository.LabelRepository;
+import io.hexlet.taskmanager.repository.TaskRepository;
+import io.hexlet.taskmanager.repository.TaskStatusRepository;
+import io.hexlet.taskmanager.repository.UserRepository;
+import io.hexlet.taskmanager.service.LabelService;
+import io.hexlet.taskmanager.service.TaskService;
+import io.hexlet.taskmanager.service.TaskStatusService;
+import io.hexlet.taskmanager.service.UserService;
+import java.util.List;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Transactional;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Transactional
+class TaskControllerTest {
+
+    private static final String ADMIN_EMAIL = "admin@example.com";
+    private static final String ADMIN_PASSWORD = "adminpass";
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private TaskRepository taskRepository;
+
+    @Autowired
+    private TaskStatusService taskStatusService;
+
+    @Autowired
+    private TaskStatusRepository taskStatusRepository;
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private LabelService labelService;
+
+    @Autowired
+    private LabelRepository labelRepository;
+
+    private String adminToken;
+
+    private Long statusId;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        taskRepository.deleteAll();
+        taskStatusRepository.deleteAll();
+        labelRepository.deleteAll();
+        userRepository.deleteAll();
+
+        userService.create(new UserCreateRequest(ADMIN_EMAIL, "Admin", "User", ADMIN_PASSWORD));
+        adminToken = authenticate(ADMIN_EMAIL, ADMIN_PASSWORD);
+        statusId = taskStatusService.create(new TaskStatusCreateRequest("Draft", "draft")).getId();
+    }
+
+    @Test
+    void shouldCreateTaskWithLabels() throws Exception {
+        Long labelId = labelService.create(new LabelCreateRequest("Feature")).id();
+
+        TaskCreateRequest request = new TaskCreateRequest("Task name", "Description", statusId, null, Set.of(labelId));
+
+        mockMvc.perform(post("/api/tasks")
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("Task name"))
+                .andExpect(jsonPath("$.labelIds[0]").value(labelId));
+
+        List<Task> tasks = taskRepository.findAll();
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).getLabels()).extracting(label -> label.getId()).containsExactly(labelId);
+    }
+
+    @Test
+    void shouldUpdateTaskLabels() throws Exception {
+        Long firstLabelId = labelService.create(new LabelCreateRequest("Feature")).id();
+        Long secondLabelId = labelService.create(new LabelCreateRequest("Bug")).id();
+
+        TaskCreateRequest createRequest = new TaskCreateRequest("Task name", "Description", statusId, null, Set.of(firstLabelId));
+
+        MvcResult creationResult = mockMvc.perform(post("/api/tasks")
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Long taskId = objectMapper.readTree(creationResult.getResponse().getContentAsString()).get("id").asLong();
+
+        TaskUpdateRequest updateRequest = new TaskUpdateRequest(null, null, null, null, Set.of(secondLabelId));
+
+        mockMvc.perform(put("/api/tasks/" + taskId)
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.labelIds[0]").value(secondLabelId));
+
+        Task updated = taskRepository.findById(taskId).orElseThrow();
+        assertThat(updated.getLabels()).extracting(label -> label.getId()).containsExactly(secondLabelId);
+    }
+
+    @Test
+    void shouldReturnTasksList() throws Exception {
+        Long labelId = labelService.create(new LabelCreateRequest("Feature")).id();
+
+        mockMvc.perform(post("/api/tasks")
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new TaskCreateRequest("Task name", "Description", statusId, null, Set.of(labelId)))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/tasks")
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Task name"))
+                .andExpect(jsonPath("$[0].labelIds[0]").value(labelId));
+    }
+
+    @Test
+    void shouldDeleteTask() throws Exception {
+        Long labelId = labelService.create(new LabelCreateRequest("Feature")).id();
+
+        MvcResult creationResult = mockMvc.perform(post("/api/tasks")
+                        .header("Authorization", bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new TaskCreateRequest("Task name", "Description", statusId, null, Set.of(labelId)))))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Long taskId = objectMapper.readTree(creationResult.getResponse().getContentAsString()).get("id").asLong();
+
+        mockMvc.perform(delete("/api/tasks/" + taskId)
+                        .header("Authorization", bearer(adminToken)))
+                .andExpect(status().isNoContent());
+
+        assertThat(taskRepository.existsById(taskId)).isFalse();
+    }
+
+    private String authenticate(String email, String password) throws Exception {
+        LoginRequest request = new LoginRequest(email, password);
+
+        MvcResult result = mockMvc.perform(post("/api/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        return result.getResponse().getContentAsString();
+    }
+
+    private String bearer(String token) {
+        return "Bearer " + token;
+    }
+}
