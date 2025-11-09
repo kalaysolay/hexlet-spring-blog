@@ -1,6 +1,7 @@
 package io.hexlet.taskmanager.controller;
 
 import io.hexlet.taskmanager.dto.task.TaskCreateRequest;
+import io.hexlet.taskmanager.dto.task.TaskFilterParams;
 import io.hexlet.taskmanager.dto.task.TaskResponse;
 import io.hexlet.taskmanager.dto.task.TaskUpdateRequest;
 import io.hexlet.taskmanager.security.UserPrincipal;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -32,8 +34,14 @@ public class TaskController {
     }
 
     @GetMapping
-    public List<TaskResponse> index() {
-        return taskService.getAll();
+    public List<TaskResponse> index(
+            @RequestParam(required = false) String titleCont,
+            @RequestParam(required = false) Long assigneeId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long labelId
+    ) {
+        TaskFilterParams filterParams = new TaskFilterParams(titleCont, assigneeId, status, labelId);
+        return taskService.getAll(filterParams);
     }
 
     @GetMapping("/{id}")
