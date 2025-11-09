@@ -1,6 +1,7 @@
 package io.hexlet.taskmanager.service;
 
 import io.hexlet.taskmanager.dto.task.TaskCreateRequest;
+import io.hexlet.taskmanager.dto.task.TaskFilterParams;
 import io.hexlet.taskmanager.dto.task.TaskResponse;
 import io.hexlet.taskmanager.dto.task.TaskUpdateRequest;
 import io.hexlet.taskmanager.model.Label;
@@ -11,12 +12,14 @@ import io.hexlet.taskmanager.repository.LabelRepository;
 import io.hexlet.taskmanager.repository.TaskRepository;
 import io.hexlet.taskmanager.repository.TaskStatusRepository;
 import io.hexlet.taskmanager.repository.UserRepository;
+import io.hexlet.taskmanager.repository.specification.TaskSpecifications;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,8 +73,19 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    public List<TaskResponse> getAll() {
-        return taskRepository.findAll(Sort.by(Sort.Direction.ASC, "id")).stream()
+    public List<TaskResponse> getAll(TaskFilterParams filterParams) {
+        Sort sort = Sort.by(Sort.Direction.ASC, "id");
+        List<Task> tasks;
+
+        Specification<Task> specification = buildSpecification(filterParams);
+
+        if (specification == null) {
+            tasks = taskRepository.findAll(sort);
+        } else {
+            tasks = taskRepository.findAll(specification, sort);
+        }
+
+        return tasks.stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -117,6 +131,39 @@ public class TaskService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found");
         }
         taskRepository.deleteById(id);
+    }
+
+    private Specification<Task> buildSpecification(TaskFilterParams filterParams) {
+        if (filterParams == null) {
+            return null;
+        }
+
+        Specification<Task> specification = Specification.where(null);
+
+        if (filterParams.hasTitle()) {
+            specification = addCondition(specification, TaskSpecifications.titleContains(filterParams.titleCont()));
+        }
+
+        if (filterParams.hasAssignee()) {
+            specification = addCondition(specification, TaskSpecifications.hasExecutor(filterParams.assigneeId()));
+        }
+
+        if (filterParams.hasStatus()) {
+            specification = addCondition(specification, TaskSpecifications.hasStatus(filterParams.status()));
+        }
+
+        if (filterParams.hasLabel()) {
+            specification = addCondition(specification, TaskSpecifications.hasLabel(filterParams.labelId()));
+        }
+
+        return specification;
+    }
+
+    private Specification<Task> addCondition(Specification<Task> base, Specification<Task> addition) {
+        if (addition == null) {
+            return base;
+        }
+        return base == null ? Specification.where(addition) : base.and(addition);
     }
 
     private TaskResponse toResponse(Task task) {
